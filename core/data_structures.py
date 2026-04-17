@@ -163,15 +163,37 @@ class Cell:
     x: int
     y: int
     is_wall: bool = False
-    cell_type: int = 0  # 0: empty, 1: wall, 2: start, 3: goal
+    cell_type: int = 0
+    terrain_cost: float = 1.0
+    terrain_type: str = "flat"
+    
+    TERRAIN_TYPES = {
+        'flat': 1.0,
+        'grass': 1.5,
+        'sand': 2.0,
+        'water': 5.0,
+        'mud': 3.0,
+        'mountain': 10.0,
+        'road': 0.8,
+    }
     
     def set_wall(self, is_wall: bool):
         self.is_wall = is_wall
         if is_wall:
             self.cell_type = 1
     
+    def set_terrain(self, terrain_type: str):
+        if terrain_type in self.TERRAIN_TYPES:
+            self.terrain_type = terrain_type
+            self.terrain_cost = self.TERRAIN_TYPES[terrain_type]
+    
+    def get_cost(self) -> float:
+        if self.is_wall:
+            return float('inf')
+        return self.terrain_cost
+    
     def __str__(self):
-        return f"Cell({self.x}, {self.y}, type={self.cell_type})"
+        return f"Cell({self.x}, {self.y}, type={self.cell_type}, terrain={self.terrain_type})"
     
     def __repr__(self):
         return self.__str__()

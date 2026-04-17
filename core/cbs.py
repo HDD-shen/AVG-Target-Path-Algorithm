@@ -15,36 +15,37 @@ class CTNode:
     constraint_dict: Dict[str, Constraints] = field(default_factory=dict)
     solution: Dict[str, List[State]] = field(default_factory=dict)
     cost: int = 0
-    nc: int = 0  # number of conflicts
+    nc: int = 0
+    parent: Optional['CTNode'] = None
 
 
 class CBS:
     """CBS（基于冲突的搜索）算法类"""
     
-    def __init__(self, env, use_v2=False):
+    def __init__(self, env, use_v2=False, use_priority: bool = True):
         """
         初始化CBS算法
         :param env: 环境对象
         :param use_v2: 是否使用改进版本
+        :param use_priority: 是否使用优先级冲突解决
         """
         self.env = env
         self.use_v2 = use_v2
+        self.use_priority = use_priority
         self.open_set: List[CTNode] = []
         self.closed_set: List[CTNode] = []
+        self.max_iterations = 50000
     
     def search(self) -> Dict[str, List[Dict]]:
         """
         执行CBS算法搜索
         :return: 解决方案字典 {agent_name: [{'t': t, 'x': x, 'y': y}, ...]}
         """
-        # 创建根节点
         start_node = CTNode()
         
-        # 初始化约束字典
         for agent_name in self.env.agent_dict.keys():
             start_node.constraint_dict[agent_name] = Constraints()
         
-        # 计算初始解
         start_node.solution = self.env.calc_solution(use_v2=self.use_v2)
         
         if not start_node.solution:
@@ -52,7 +53,6 @@ class CBS:
         
         start_node.cost = self.env.calc_solution_cost(start_node.solution)
         
-        # 加入开放列表
         self.open_set.append(start_node)
         
         cnt = 0
@@ -60,30 +60,30 @@ class CBS:
         while self.open_set:
             cnt += 1
             
-            # 取出cost最小的节点
+            if cnt > self.max_iterations:
+                print(f"CBS reached max iterations: {self.max_iterations}")
+                return self.generate_plan(self.open_set[0].solution)
+            
             p = self.find_min_cost(self.open_set)
             self.open_set.remove(p)
             self.closed_set.append(p)
             
-            # 设置当前约束
             self.env.set_constraints(p.constraint_dict)
             
-            # 获取第一个冲突
             conflict = self.env.get_first_conflict(p.solution)
             
-            print(f"CBS iteration {cnt}")
+            if cnt % 100 == 0:
+                print(f"CBS iteration {cnt}, cost: {p.cost}")
             
-            # 如果没有冲突，找到解
             if not conflict:
                 print(f"CBS solved in {cnt} iterations")
                 return self.generate_plan(p.solution)
             
-            # 将冲突转换为约束
             constraint_dict = self.env.create_constraint_from_conflict(conflict)
             
-            # 根据冲突分裂节点
             for agent_name in constraint_dict.keys():
                 new_node = copy.deepcopy(p)
+                new_node.parent = p
                 new_node.constraint_dict[agent_name].vertex_constraints.update(
                     constraint_dict[agent_name].vertex_constraints
                 )
@@ -91,10 +91,8 @@ class CBS:
                     constraint_dict[agent_name].edge_constraints
                 )
                 
-                # 切换环境约束
                 self.env.set_constraints(new_node.constraint_dict)
                 
-                # 重新计算该agent的路径
                 if self.use_v2:
                     new_node.solution = self.env.calc_one_solution(p.solution, agent_name)
                 else:
@@ -106,7 +104,6 @@ class CBS:
                 new_node.cost = self.env.calc_solution_cost(new_node.solution)
                 new_node.nc = self.env.calc_num_of_conflicts(new_node.constraint_dict)
                 
-                # 检查是否已在开放列表中
                 if not self.is_in_open_set(new_node):
                     self.open_set.append(new_node)
         
@@ -115,18 +112,29 @@ class CBS:
     
     def find_min_cost(self, node_list: List[CTNode]) -> CTNode:
         """找到cost最小的节点"""
-        min_node = None
-        min_cost = float('inf')
-        
-        for node in node_list:
-            if node.cost < min_cost:
-                min_node = node
-                min_cost = node.cost
-            elif node.cost == min_cost:
-                if min_node and node.nc > min_node.nc:
+        if self.use_priority:
+            min_node = None
+            min_cost = float('inf')
+            
+            for node in node_list:
+                if node.cost < min_cost:
                     min_node = node
-        
-        return min_node
+                    min_cost = node.cost
+            
+            return min_node
+        else:
+            min_node = None
+            min_cost = float('inf')
+            
+            for node in node_list:
+                if node.cost < min_cost:
+                    min_node = node
+                    min_cost = node.cost
+                elif node.cost == min_cost:
+                    if min_node and node.nc > min_node.nc:
+                        min_node = node
+            
+            return min_node
     
     def is_in_open_set(self, node: CTNode) -> bool:
         """检查节点是否在开放列表中"""
@@ -170,4 +178,67 @@ class CBSV2(CBS):
     """改进版CBS算法"""
     
     def __init__(self, env):
-        super().__init__(env, use_v2=True)
+        super().__init__(env, use_v2=True, use_priority=True)
+
+
+class EnhancedCBS(CBS):
+    """增强版CBS - 支持更多冲突类型和优化策略"""
+    
+    def __init__(self, env):
+        super().__init__(env, use_v2=True, use_priority=True)
+        self.conflict_history: List[Conflict] = []
+    
+    def get_first_conflict_enhanced(self, solution: Dict[str, List[State]]) -> Optional[Conflict]:
+        """获取第一个冲突（支持更多冲突类型）"""
+        max_time = 0
+        agent_names = []
+        
+        for agent_name in solution:
+            path = solution[agent_name]
+            max_time = max(max_time, len(path))
+            agent_names.append(agent_name)
+        
+        for t in range(max_time):
+            for i in range(len(agent_names)):
+                for j in range(i + 1, len(agent_names)):
+                    agent1 = agent_names[i]
+                    agent2 = agent_names[j]
+                    
+                    state1 = self.get_state(agent1, solution, t)
+                    state2 = self.get_state(agent2, solution, t)
+                    
+                    if state1.is_equal_except_time(state2):
+                        conflict = Conflict()
+                        conflict.time = t
+                        conflict.conflict_type = Conflict.TYPE_VERTEX
+                        conflict.location1 = state1.location
+                        conflict.agent1 = agent1
+                        conflict.agent2 = agent2
+                        return conflict
+                    
+                    if t < max_time - 1:
+                        state1a = self.get_state(agent1, solution, t)
+                        state1b = self.get_state(agent1, solution, t + 1)
+                        state2a = self.get_state(agent2, solution, t)
+                        state2b = self.get_state(agent2, solution, t + 1)
+                        
+                        if (state1a.is_equal_except_time(state2b) and 
+                            state1b.is_equal_except_time(state2a)):
+                            conflict = Conflict()
+                            conflict.time = t
+                            conflict.conflict_type = Conflict.TYPE_EDGE
+                            conflict.agent1 = agent1
+                            conflict.agent2 = agent2
+                            conflict.location1 = state1a.location
+                            conflict.location2 = state1b.location
+                            return conflict
+        
+        return None
+    
+    def get_state(self, agent_name: str, solution: Dict[str, List[State]], time: int) -> State:
+        """获取特定时间的状态"""
+        if time < len(solution[agent_name]):
+            return solution[agent_name][time]
+        else:
+            index = len(solution[agent_name]) - 1
+            return solution[agent_name][index]

@@ -1,5 +1,5 @@
 """
-Pygame可视化演示界面
+Pygame可视化演示界面 - 美化版
 """
 
 import pygame
@@ -7,141 +7,133 @@ import sys
 import time
 from typing import Dict, List, Optional
 
-# 颜色定义
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GRAY = (128, 128,128)
-LIGHT_GRAY = (200, 200, 200)
-DARK_GRAY = (51, 51, 51)
+# 颜色定义 - 现代配色方案
+COLORS = {
+    'bg': (240, 244, 248),
+    'bg_dark': (30, 30, 40),
+    'panel': (255, 255, 255),
+    'grid': (200, 200, 210),
+    'grid_line': (180, 180, 190),
+    'wall': (60, 60, 70),
+    'text': (30, 30, 40),
+    'text_light': (255, 255, 255),
+    'button': (70, 130, 180),
+    'button_hover': (100, 160, 210),
+    'button_pressed': (50, 100, 150),
+    'success': (46, 204, 113),
+    'warning': (241, 196, 15),
+}
 
-# AGV颜色
+TERRAIN_COLORS = {
+    'flat': (255, 255, 255),
+    'grass': (152, 251, 152),
+    'sand': (244, 224, 159),
+    'water': (135, 206, 250),
+    'road': (180, 180, 180),
+    'mud': (181, 137, 96),
+    'mountain': (139, 119, 101),
+}
+
 AGV_COLORS = [
-    (255, 0, 0),     # 红色
-    (0, 255, 0),     # 绿色
-    (0, 0, 255),     # 蓝色
-    (255, 255, 0),   # 黄色
-    (255, 0, 255),   # 紫色
-    (0, 255, 255),   # 青色
-    (255, 128, 0),   # 橙色
-    (128, 0, 255),   # 紫罗兰
+    (231, 76, 60),
+    (52, 152, 219),
+    (46, 204, 113),
+    (155, 89, 182),
+    (230, 126, 34),
+    (26, 188, 156),
+    (241, 196, 15),
+    (149, 165, 166),
 ]
 
 
 class Visualizer:
-    """可视化演示类"""
+    """可视化演示类 - 美化版"""
     
-    def __init__(self, env, cell_size: int = 40):
-        """
-        初始化可视化器
-        :param env: 环境对象
-        :param cell_size: 单元格大小
-        """
+    def __init__(self, env, cell_size: int = 45):
         self.env = env
         self.cell_size = cell_size
         
-        # 计算画布大小
-        self.width = env.cols * cell_size + 200  # 额外空间用于UI
-        self.height = env.rows * cell_size + 150
+        self.width = env.cols * cell_size + 280
+        self.height = max(env.rows * cell_size + 180, 650)
         
-        # 初始化Pygame
         pygame.init()
+        pygame.display.set_caption("AGV多智能体路径规划系统")
+        
+        icon = pygame.Surface((32, 32))
+        icon.fill(COLORS['button'])
+        pygame.display.set_icon(icon)
+        
         self.screen = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption("多AGV路径规划演示系统")
         
-        # 字体
-        self.font = pygame.font.SysFont('microsoftyahei', 14)
-        self.title_font = pygame.font.SysFont('microsoftyahei', 20, bold=True)
+        self.font = pygame.font.SysFont('simhei', 14)
+        self.font_bold = pygame.font.SysFont('simhei', 16, bold=True)
+        self.title_font = pygame.font.SysFont('simhei', 24, bold=True)
+        self.info_font = pygame.font.SysFont('simhei', 12)
         
-        # 状态
         self.running = True
         self.paused = True
         self.solution = None
         self.current_time = 0
         self.max_time = 0
         
-        # 速度控制
-        self.speed = 10  # 步/秒
+        self.speed = 8
         self.last_update_time = 0
         
-        # AGV对象
         self.agent_objs = []
-        
-        # 按钮
         self.buttons = []
         self.create_buttons()
+        
+        self.animation_offset = 0
     
     def create_buttons(self):
-        """创建按钮"""
-        btn_x = self.env.cols * self.cell_size + 20
-        btn_y = 30
+        panel_x = self.env.cols * self.cell_size + 20
         
-        # 运行/暂停按钮
-        self.buttons.append({
-            'rect': pygame.Rect(btn_x, btn_y, 80, 30),
-            'text': '运行',
-            'action': 'run_pause'
-        })
+        button_configs = [
+            {'y': 80, 'text': '播放/暂停', 'action': 'run_pause', 'key': 'SPACE'},
+            {'y': 130, 'text': '单步前进', 'action': 'step', 'key': 'RIGHT'},
+            {'y': 180, 'text': '重新开始', 'action': 'reset', 'key': 'R'},
+            {'y': 240, 'text': '加速 +', 'action': 'speed_up', 'key': 'UP'},
+            {'y': 280, 'text': '减速 -', 'action': 'speed_down', 'key': 'DOWN'},
+        ]
         
-        # 单步按钮
-        self.buttons.append({
-            'rect': pygame.Rect(btn_x, btn_y + 40, 80, 30),
-            'text': '单步',
-            'action': 'step'
-        })
-        
-        # 重置按钮
-        self.buttons.append({
-            'rect': pygame.Rect(btn_x, btn_y + 80, 80, 30),
-            'text': '重置',
-            'action': 'reset'
-        })
-        
-        # 加速按钮
-        self.buttons.append({
-            'rect': pygame.Rect(btn_x, btn_y + 130, 80, 30),
-            'text': '加速',
-            'action': 'speed_up'
-        })
-        
-        # 减速按钮
-        self.buttons.append({
-            'rect': pygame.Rect(btn_x + 90, btn_y + 130, 80, 30),
-            'text': '减速',
-            'action': 'speed_down'
-        })
+        for cfg in button_configs:
+            self.buttons.append({
+                'rect': pygame.Rect(panel_x, cfg['y'], 120, 36),
+                'text': cfg['text'],
+                'sub': f'[{cfg["key"]}]',
+                'action': cfg['action']
+            })
     
     def set_solution(self, solution: Dict[str, List[Dict]]):
-        """设置解决方案"""
         self.solution = solution
         self.current_time = 0
         
-        # 计算最大时间
         self.max_time = 0
         for agent_name in solution:
             self.max_time = max(self.max_time, len(solution[agent_name]))
         
-        # 为每个智能体创建对象
         self.agent_objs = []
-        for agent in self.env.agents:
+        for i, agent in enumerate(self.env.agents):
             if agent.name in solution:
                 path = solution[agent.name]
+                color = tuple(agent.color) if agent.color else AGV_COLORS[i % len(AGV_COLORS)]
                 agent_obj = {
                     'agent': agent,
                     'path': path,
-                    'color': tuple(agent.color) if agent.color else AGV_COLORS[len(self.agent_objs) % len(AGV_COLORS)]
+                    'color': color,
+                    'start_pos': tuple(agent.start),
+                    'goal_pos': tuple(agent.goal),
                 }
                 self.agent_objs.append(agent_obj)
         
-        print(f"解决方案设置完成，最大时间步: {self.max_time}")
+        self.paused = True
     
     def handle_events(self):
-        """处理事件"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                # 检查按钮点击
                 mouse_pos = event.pos
                 for btn in self.buttons:
                     if btn['rect'].collidepoint(mouse_pos):
@@ -154,38 +146,35 @@ class Visualizer:
                     self.handle_button_click('step')
                 elif event.key == pygame.K_r:
                     self.handle_button_click('reset')
+                elif event.key == pygame.K_UP:
+                    self.handle_button_click('speed_up')
+                elif event.key == pygame.K_DOWN:
+                    self.handle_button_click('speed_down')
     
     def handle_button_click(self, action: str):
-        """处理按钮点击"""
         if action == 'run_pause':
             if self.solution is None:
-                print("请先计算路径！")
                 return
             self.paused = not self.paused
             if not self.paused:
                 self.last_update_time = time.time()
         
         elif action == 'step':
-            if self.solution is None:
-                print("请先计算路径！")
+            if self.solution is None or self.current_time >= self.max_time - 1:
                 return
-            if self.current_time < self.max_time - 1:
-                self.current_time += 1
-            else:
-                print("已到达终点！")
+            self.current_time += 1
         
         elif action == 'reset':
             self.current_time = 0
             self.paused = True
         
         elif action == 'speed_up':
-            self.speed = min(self.speed + 5, 50)
+            self.speed = min(self.speed + 2, 30)
         
         elif action == 'speed_down':
-            self.speed = max(self.speed - 5, 1)
+            self.speed = max(self.speed - 2, 1)
     
     def update(self):
-        """更新状态"""
         if not self.paused and self.solution:
             current_time = time.time()
             interval = 1.0 / self.speed
@@ -195,144 +184,229 @@ class Visualizer:
                     self.current_time += 1
                 else:
                     self.paused = True
-                    print("所有AGV已到达终点！")
                 self.last_update_time = current_time
     
     def draw(self):
-        """绘制画面"""
-        self.screen.fill(WHITE)
+        self.screen.fill(COLORS['bg'])
         
-        # 绘制标题
-        title = self.title_font.render("多AGV路径规划演示系统", True, BLACK)
-        self.screen.blit(title, (20, 5))
-        
-        # 绘制地图
-        self.draw_grid()
-        self.draw_agents()
-        self.draw_buttons()
-        self.draw_info()
+        self.draw_title_bar()
+        self.draw_map_panel()
+        self.draw_side_panel()
         
         pygame.display.flip()
     
-    def draw_grid(self):
-        """绘制网格"""
-        cell_size = self.cell_size
+    def draw_title_bar(self):
+        pygame.draw.rect(self.screen, COLORS['bg_dark'], (0, 0, self.width, 50))
         
-        # 绘制网格线
-        pygame.draw.lines(self.screen, DARK_GRAY, True, 
-                         [(0, 0), (self.env.cols * cell_size, 0),
-                          (self.env.cols * cell_size, self.env.rows * cell_size),
-                          (0, self.env.rows * cell_size)], 2)
+        title = self.title_font.render("AGV 多智能体路径规划系统", True, COLORS['text_light'])
+        self.screen.blit(title, (20, 12))
         
-        for i in range(self.env.cols + 1):
-            pygame.draw.line(self.screen, DARK_GRAY, 
-                           (i * cell_size, 0), (i * cell_size, self.env.rows * cell_size), 1)
-        
-        for j in range(self.env.rows + 1):
-            pygame.draw.line(self.screen, DARK_GRAY,
-                           (0, j * cell_size), (self.env.cols * cell_size, j * cell_size), 1)
-        
-        # 绘制障碍物
-        for obs in self.env.obstacles:
-            x, y = obs
-            rect = pygame.Rect(x * cell_size + 2, y * cell_size + 2, 
-                              cell_size - 4, cell_size - 4)
-            pygame.draw.rect(self.screen, GRAY, rect)
+        status = "运行中" if not self.paused else "已暂停"
+        status_color = COLORS['success'] if not self.paused else COLORS['warning']
+        status_text = self.font_bold.render(status, True, status_color)
+        self.screen.blit(status_text, (self.width - 120, 15))
     
-    def draw_agents(self):
-        """绘制智能体"""
-        cell_size = self.cell_size
+    def draw_map_panel(self):
+        map_bg = pygame.Rect(15, 60, self.env.cols * self.cell_size + 10, self.env.rows * self.cell_size + 10)
+        pygame.draw.rect(self.screen, COLORS['panel'], map_bg, border_radius=8)
+        pygame.draw.rect(self.screen, COLORS['grid_line'], map_bg, 2, border_radius=8)
         
-        # 绘制起点和终点
+        offset_x, offset_y = 20, 65
+        
+        for y in range(self.env.rows):
+            for x in range(self.env.cols):
+                rect = pygame.Rect(
+                    offset_x + x * self.cell_size,
+                    offset_y + y * self.cell_size,
+                    self.cell_size - 1,
+                    self.cell_size - 1
+                )
+                
+                terrain_cost = self.env.get_terrain_cost(x, y)
+                if [x, y] in self.env.obstacles:
+                    pygame.draw.rect(self.screen, COLORS['wall'], rect, border_radius=4)
+                else:
+                    color = (255, 255, 255)
+                    if hasattr(self.env, 'grid') and self.env.grid:
+                        cell = self.env.grid[x][y]
+                        if hasattr(cell, 'terrain_type'):
+                            color = TERRAIN_COLORS.get(cell.terrain_type, (255, 255, 255))
+                    pygame.draw.rect(self.screen, color, rect, border_radius=2)
+                    pygame.draw.rect(self.screen, COLORS['grid'], rect, 1, border_radius=2)
+        
+        self.draw_paths(offset_x, offset_y)
+        self.draw_agents(offset_x, offset_y)
+        self.draw_start_goal_markers(offset_x, offset_y)
+    
+    def draw_paths(self, offset_x, offset_y):
+        if not self.solution:
+            return
+        
         for agent_obj in self.agent_objs:
-            agent = agent_obj['agent']
+            path = agent_obj['path']
             color = agent_obj['color']
             
-            # 起点 - 圆形
-            start_x = agent.start[0] * cell_size + cell_size // 2
-            start_y = agent.start[1] * cell_size + cell_size // 2
-            pygame.draw.circle(self.screen, color, (start_x, start_y), cell_size // 3, 2)
+            points = []
+            for i, p in enumerate(path[:self.current_time + 1]):
+                px = offset_x + p['x'] * self.cell_size + self.cell_size // 2
+                py = offset_y + p['y'] * self.cell_size + self.cell_size // 2
+                points.append((px, py))
             
-            # 终点 - 方框
-            goal_rect = pygame.Rect(
-                agent.goal[0] * cell_size + 4,
-                agent.goal[1] * cell_size + 4,
-                cell_size - 8, cell_size - 8
-            )
-            pygame.draw.rect(self.screen, color, goal_rect, 2)
-        
-        # 绘制当前位置
-        if self.solution:
-            for agent_obj in self.agent_objs:
-                agent = agent_obj['agent']
-                color = agent_obj['color']
-                path = agent_obj['path']
-                
-                # 获取当前位置
-                if self.current_time < len(path):
-                    x, y = path[self.current_time]['x'], path[self.current_time]['y']
-                else:
-                    x, y = path[-1]['x'], path[-1]['y']
-                
-                # 绘制AGV（实心圆）
-                center_x = x * cell_size + cell_size // 2
-                center_y = y * cell_size + cell_size // 2
-                pygame.draw.circle(self.screen, color, (center_x, center_y), cell_size // 3)
-                
-                # 绘制名称
-                name_text = self.font.render(agent.name, True, WHITE)
-                text_rect = name_text.get_rect(center=(center_x, center_y))
-                self.screen.blit(name_text, text_rect)
+            if len(points) > 1:
+                pygame.draw.lines(self.screen, (*color, 100), False, points, 3)
     
-    def draw_buttons(self):
-        """绘制按钮"""
+    def draw_start_goal_markers(self, offset_x, offset_y):
+        for agent_obj in self.agent_objs:
+            color = agent_obj['color']
+            start = agent_obj['start_pos']
+            goal = agent_obj['goal_pos']
+            
+            sx = offset_x + start[0] * self.cell_size + self.cell_size // 2
+            sy = offset_y + start[1] * self.cell_size + self.cell_size // 2
+            pygame.draw.circle(self.screen, (*color, 80), (sx, sy), self.cell_size // 2 + 4, 2)
+            
+            gx = offset_x + goal[0] * self.cell_size + 5
+            gy = offset_y + goal[1] * self.cell_size + 5
+            goal_rect = pygame.Rect(gx, gy, self.cell_size - 10, self.cell_size - 10)
+            pygame.draw.rect(self.screen, (*color, 150), goal_rect, 2, border_radius=4)
+            
+            start_label = self.info_font.render("S", True, color)
+            goal_label = self.info_font.render("G", True, color)
+            self.screen.blit(start_label, (sx - 4, sy - 6))
+            self.screen.blit(goal_label, (gx + 5, gy + 3))
+    
+    def draw_agents(self, offset_x, offset_y):
+        if not self.solution:
+            return
+        
+        for agent_obj in self.agent_objs:
+            path = agent_obj['path']
+            color = agent_obj['color']
+            
+            if self.current_time < len(path):
+                pos = path[self.current_time]
+            else:
+                pos = path[-1]
+            
+            cx = offset_x + pos['x'] * self.cell_size + self.cell_size // 2
+            cy = offset_y + pos['y'] * self.cell_size + self.cell_size // 2
+            
+            pygame.draw.circle(self.screen, (*color, 50), (cx, cy), self.cell_size // 2 + 2)
+            pygame.draw.circle(self.screen, color, (cx, cy), self.cell_size // 3, border_radius=4)
+            
+            name = agent_obj['agent'].name.replace('agent', 'AGV')
+            name_text = self.font.render(name, True, COLORS['text_light'])
+            text_rect = name_text.get_rect(center=(cx, cy))
+            self.screen.blit(name_text, text_rect)
+    
+    def draw_side_panel(self):
+        panel_x = self.env.cols * self.cell_size + 15
+        
+        panel = pygame.Rect(panel_x, 60, 250, self.height - 70)
+        pygame.draw.rect(self.screen, COLORS['panel'], panel, border_radius=8)
+        
+        self.draw_buttons(panel_x)
+        self.draw_info_panel(panel_x)
+        self.draw_legend(panel_x)
+    
+    def draw_buttons(self, panel_x):
         mouse_pos = pygame.mouse.get_pos()
         
         for btn in self.buttons:
-            # 检查鼠标悬停
             is_hovered = btn['rect'].collidepoint(mouse_pos)
-            color = LIGHT_GRAY if is_hovered else GRAY
             
-            # 绘制按钮
-            pygame.draw.rect(self.screen, color, btn['rect'])
-            pygame.draw.rect(self.screen, DARK_GRAY, btn['rect'], 2)
+            if is_hovered:
+                color = COLORS['button_hover']
+            else:
+                color = COLORS['button']
             
-            # 绘制文字
-            text = self.font.render(btn['text'], True, BLACK)
-            text_rect = text.get_rect(center=btn['rect'].center)
+            pygame.draw.rect(self.screen, color, btn['rect'], border_radius=6)
+            
+            text = self.font_bold.render(btn['text'], True, COLORS['text_light'])
+            text_rect = text.get_rect(center=(btn['rect'].centerx, btn['rect'].centery - 6))
             self.screen.blit(text, text_rect)
+            
+            sub = self.info_font.render(btn['sub'], True, (*COLORS['text_light'], 180))
+            sub_rect = sub.get_rect(center=(btn['rect'].centerx, btn['rect'].centery + 10))
+            self.screen.blit(sub, sub_rect)
     
-    def draw_info(self):
-        """绘制信息"""
-        info_y = self.env.rows * self.cell_size + 10
+    def draw_info_panel(self, panel_x):
+        y = 340
         
-        # 当前时间
-        time_text = self.font.render(f"时间步: {self.current_time}/{self.max_time - 1}", True, BLACK)
-        self.screen.blit(time_text, (20, info_y))
+        title = self.font_bold.render("状态信息", True, COLORS['text'])
+        self.screen.blit(title, (panel_x + 20, y))
         
-        # 状态
-        status = "运行中" if not self.paused else "已暂停"
-        status_text = self.font.render(f"状态: {status}", True, BLACK)
-        self.screen.blit(status_text, (150, info_y))
+        y += 35
         
-        # 速度
-        speed_text = self.font.render(f"速度: {self.speed} 步/秒", True, BLACK)
-        self.screen.blit(speed_text, (280, info_y))
+        info_items = [
+            ("时间步", f"{self.current_time} / {max(0, self.max_time - 1)}"),
+            ("运行速度", f"{self.speed} 步/秒"),
+            ("AGV数量", str(len(self.agent_objs))),
+            ("地图大小", f"{self.env.cols} x {self.env.rows}"),
+        ]
+        
+        for label, value in info_items:
+            label_text = self.font.render(label + ":", True, COLORS['text'])
+            value_text = self.font_bold.render(str(value), True, COLORS['button'])
+            
+            self.screen.blit(label_text, (panel_x + 20, y))
+            self.screen.blit(value_text, (panel_x + 100, y))
+            y += 28
+        
+        if self.solution:
+            total_cost = sum(len(p) for p in self.solution.values())
+            y += 10
+            cost_text = self.font.render("总代价:", True, COLORS['text'])
+            cost_value = self.font_bold.render(str(total_cost), True, COLORS['success'])
+            self.screen.blit(cost_text, (panel_x + 20, y))
+            self.screen.blit(cost_value, (panel_x + 100, y))
+    
+    def draw_legend(self, panel_x):
+        y = 490
+        
+        title = self.font_bold.render("图例", True, COLORS['text'])
+        self.screen.blit(title, (panel_x + 20, y))
+        
+        y += 30
+        
+        legend_items = [
+            ("起点", None, True),
+            ("终点", None, False),
+            ("障碍物", COLORS['wall'], None),
+            ("草地", TERRAIN_COLORS['grass'], None),
+            ("沙地", TERRAIN_COLORS['sand'], None),
+            ("道路", TERRAIN_COLORS['road'], None),
+        ]
+        
+        for label, color, marker_type in legend_items:
+            if marker_type is not None:
+                cx = panel_x + 25 + 8
+                cy = y + 8
+                if marker_type:
+                    pygame.draw.circle(self.screen, (100, 100, 100), (cx, cy), 6, 1)
+                else:
+                    pygame.draw.rect(self.screen, (100, 100, 100), (cx - 5, cy - 5, 10, 10), 1)
+            elif color:
+                pygame.draw.rect(self.screen, color, (panel_x + 20, y, 16, 16), border_radius=2)
+            
+            text = self.info_font.render(label, True, COLORS['text'])
+            self.screen.blit(text, (panel_x + 45, y + 2))
+            y += 22
     
     def run(self):
-        """主循环"""
+        clock = pygame.time.Clock()
+        
         while self.running:
             self.handle_events()
             self.update()
             self.draw()
-            time.sleep(0.01)
+            clock.tick(60)
         
         pygame.quit()
         sys.exit()
 
 
 def create_demo(env, solution):
-    """创建演示实例"""
     vis = Visualizer(env)
     vis.set_solution(solution)
     return vis

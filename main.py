@@ -1,3 +1,4 @@
+
 """
 多AGV路径规划演示系统 - 主程序
 """
@@ -10,7 +11,7 @@ from typing import Dict, List
 # 导入项目模块
 from core.data_structures import Agent
 from core.environment import Environment
-from core.cbs import CBS, CBSV2
+from core.algorithms import MAPFPUSH
 from maps import get_map, generate_random_map
 
 
@@ -19,6 +20,8 @@ def create_environment(map_config: dict) -> Environment:
     dimension = map_config['dimension']
     obstacles = map_config.get('obstacles', [])
     wall_ratio = map_config.get('wallRatio', -1)
+    terrain_map = map_config.get('terrain', {})
+    use_diagonal = map_config.get('use_diagonal', True)
     
     # 创建智能体对象
     agents = []
@@ -31,37 +34,42 @@ def create_environment(map_config: dict) -> Environment:
         )
         agents.append(agent)
     
-    env = Environment(dimension, agents, wall_ratio, obstacles)
+    env = Environment(dimension, agents, wall_ratio, obstacles, terrain_map, use_diagonal)
     return env
 
 
-def run_algorithm(env: Environment, algorithm: str = 'cbs') -> Dict:
-    """运行路径规划算法"""
+def run_algorithm(env: Environment, path_algorithm: str = "astar") -> Dict:
+    """运行MAPF-PUSH路径规划算法
+    
+    Args:
+        env: 环境对象
+        path_algorithm: 寻路算法类型 "astar", "astar_v2", "weighted", "jps"
+    
+    Returns:
+        Dict: 解决方案
+    """
     print(f"\n{'='*50}")
-    print(f"开始运行 {algorithm.upper()} 算法...")
+    print(f"MAPF-PUSH 高效多智能体路径规划")
     print(f"地图尺寸: {env.cols} x {env.rows}")
     print(f"智能体数量: {len(env.agents)}")
     print(f"障碍物数量: {len(env.obstacles)}")
+    print(f"允许对角线移动: {env.use_diagonal}")
+    print(f"寻路算法: {path_algorithm}")
     print(f"{'='*50}\n")
     
     start_time = time.time()
     
-    if algorithm == 'cbs':
-        cbs = CBS(env)
-        solution = cbs.search()
-    elif algorithm == 'cbs_v2':
-        cbs = CBSV2(env)
-        solution = cbs.search()
-    else:
-        print(f"未知算法: {algorithm}")
-        return {}
+    solver = MAPFPUSH(env, path_algorithm=path_algorithm)
+    solution = solver.search()
     
     end_time = time.time()
     
     print(f"\n{'='*50}")
     print(f"算法运行完成！")
     print(f"总耗时: {end_time - start_time:.3f} 秒")
-    print(f"解决方案: {solution}")
+    if solution:
+        total_cost = sum(len(path) for path in solution.values())
+        print(f"解决方案总代价: {total_cost}")
     print(f"{'='*50}\n")
     
     return solution
@@ -78,10 +86,13 @@ def run_console_demo():
     print("3. map_8by8_12_3 - 8x8地图，3个AGV")
     print("4. map_10by10_simple - 10x10地图，3个AGV")
     print("5. map_15by15 - 15x15地图，4个AGV")
-    print("6. 自定义随机地图")
+    print("6. map_complex_terrain - 复杂地形图(草地/沙地/水域)")
+    print("7. map_maze - 迷宫地图")
+    print("8. map_large_complex - 大型复杂地图")
+    print("9. 自定义随机地图")
     print("0. 退出")
     
-    choice = input("\n请选择 (0-6): ")
+    choice = input("\n请选择 (0-9): ")
     
     if choice == '0':
         print("退出程序")
@@ -99,6 +110,12 @@ def run_console_demo():
     elif choice == '5':
         map_config = get_map('map_15by15')
     elif choice == '6':
+        map_config = get_map('map_complex_terrain')
+    elif choice == '7':
+        map_config = get_map('map_maze')
+    elif choice == '8':
+        map_config = get_map('map_large_complex')
+    elif choice == '9':
         try:
             cols = int(input("输入地图列数 (5-50): "))
             rows = int(input("输入地图行数 (5-50): "))
@@ -117,15 +134,21 @@ def run_console_demo():
     env = create_environment(map_config)
     print(f"环境创建成功: {env}")
     
-    # 选择算法
-    print("\n请选择算法:")
-    print("1. CBS (原始版本)")
-    print("2. CBS_v2 (改进版本)")
-    alg_choice = input("请选择 (1-2): ")
-    algorithm = 'cbs_v2' if alg_choice == '2' else 'cbs'
+    # 选择寻路算法
+    print("\n请选择寻路算法:")
+    print("1. A* (标准)")
+    print("2. A* v2 (改进版)")
+    print("3. Weighted A* (加权，支持地形)")
+    path_choice = input("请选择 (1-3): ")
+    if path_choice == '2':
+        path_algorithm = "astar_v2"
+    elif path_choice == '3':
+        path_algorithm = "weighted"
+    else:
+        path_algorithm = "astar"
     
     # 运行算法
-    solution = run_algorithm(env, algorithm)
+    solution = run_algorithm(env, path_algorithm)
     
     if solution:
         print("\n路径规划成功！")
@@ -170,7 +193,7 @@ def run_simple_test():
     env = create_environment(map_config)
     
     # 运行算法
-    solution = run_algorithm(env, 'cbs')
+    solution = run_algorithm(env, "astar")
     
     if solution:
         print("\n路径规划成功！")

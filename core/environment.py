@@ -5,7 +5,7 @@
 from typing import Dict, List, Optional, Set
 from .data_structures import (
     Location, State, Cell, Agent, Constraints, 
-    VertexConstraint, EdgeConstraint, Conflict, DIRS
+    VertexConstraint, EdgeConstraint, Conflict, DIRS, DIRS8
 )
 
 
@@ -13,64 +13,85 @@ class Environment:
     """环境类 - 管理地图网格、智能体和约束"""
     
     def __init__(self, dimension: List[int], agents: List[Agent], 
-                 wall_ratio: float = -1, obstacles: List[List[int]] = None):
+                 wall_ratio: float = -1, obstacles: List[List[int]] = None,
+                 terrain_map: Dict[str, List[List[int]]] = None,
+                 use_diagonal: bool = True):
         """
         初始化环境
         :param dimension: [cols, rows] 地图尺寸
         :param agents: 智能体列表
         :param wall_ratio: 障碍物比例（-1表示使用指定的obstacles）
         :param obstacles: 指定障碍物位置列表
+        :param terrain_map: 地形图 {terrain_type: [[x,y], ...]}
+        :param use_diagonal: 是否允许对角线移动
         """
-        self.dimension = dimension  # [cols, rows]
+        self.dimension = dimension
         self.cols = dimension[0]
         self.rows = dimension[1]
         
         self.wall_ratio = wall_ratio
         self.obstacles = obstacles if obstacles else []
+        self.terrain_map = terrain_map if terrain_map else {}
+        self.use_diagonal = use_diagonal
         
-        # 网格
         self.grid: List[List[Cell]] = []
         
-        # 智能体
         self.agents = agents
         self.agent_dict: Dict[str, Dict] = {}
         
-        # 约束
         self.constraints = Constraints()
         self.constraint_dict: Dict[str, Constraints] = {}
         
-        # 算法
-        from .astar import AStar, AStarV2
+        from .astar import AStar, AStarV2, WeightedAStar, JumpPointSearch
         self.a_star = AStar(self)
         self.a_star_v2 = AStarV2(self)
+        self.weighted_astar = WeightedAStar(self)
+        self.jps = JumpPointSearch(self)
         self.alg = self.a_star
         
-        # 初始化
         self.init_grid()
         self.make_agent_dict()
     
     def init_grid(self):
         """初始化网格"""
         if self.wall_ratio == -1:
-            # 使用指定的障碍物
             for i in range(self.cols):
                 self.grid.append([])
                 for j in range(self.rows):
                     self.grid[i].append(Cell(i, j))
             
-            # 设置障碍物
             for obs in self.obstacles:
                 self.grid[obs[0]][obs[1]].set_wall(True)
         else:
-            # 随机生成障碍物
             import random
             for i in range(self.cols):
                 self.grid.append([])
                 for j in range(self.rows):
                     is_wall = random.random() < self.wall_ratio
-                    self.grid[i].append(Cell(i, j, is_wall))
+                    self.grid[i][j] = Cell(i, j, is_wall)
                     if is_wall:
                         self.obstacles.append([i, j])
+        
+        self._apply_terrain_map()
+    
+    def _apply_terrain_map(self):
+        """应用地形图"""
+        for terrain_type, positions in self.terrain_map.items():
+            for pos in positions:
+                x, y = pos[0], pos[1]
+                if 0 <= x < self.cols and 0 <= y < self.rows:
+                    self.grid[x][y].set_terrain(terrain_type)
+    
+    def set_terrain(self, x: int, y: int, terrain_type: str):
+        """设置指定位置的地形"""
+        if 0 <= x < self.cols and 0 <= y < self.rows:
+            self.grid[x][y].set_terrain(terrain_type)
+    
+    def get_terrain_cost(self, x: int, y: int) -> float:
+        """获取位置的地形代价"""
+        if 0 <= x < self.cols and 0 <= y < self.rows:
+            return self.grid[x][y].get_cost()
+        return float('inf')
     
     def make_agent_dict(self):
         """创建智能体字典"""
@@ -96,20 +117,62 @@ class Environment:
         """获取邻居状态"""
         neighbors = []
         
-        # 等待（停在原地）
         new_state = State(state.time + 1, state.location)
         if self.is_state_valid(new_state):
             neighbors.append(new_state)
         
-        # 四个方向移动
-        for dx, dy in DIRS:
+        directions = DIRS8 if self.use_diagonal else DIRS
+        for dx, dy in directions:
             new_x = state.location.x + dx
             new_y = state.location.y + dy
+            
+            if self.use_diagonal and dx != 0 and dy != 0:
+                if not self._can_move_diagonal(state.location.x, state.location.y, new_x, new_y):
+                    continue
+            
             new_loc = Location(new_x, new_y)
             new_state = State(state.time + 1, new_loc)
             
             if self.is_state_valid(new_state) and self.is_edge_satisfied(state, new_state):
                 neighbors.append(new_state)
+        
+        return neighbors
+    
+    def _can_move_diagonal(self, x1: int, y1: int, x2: int, y2: int) -> bool:
+        """检查对角线移动是否可行（需要两个相邻格子都不是墙）"""
+        if self.is_wall(x1, y2) and self.is_wall(x2, y1):
+            return False
+        return True
+    
+    def get_neighbors_extended(self, state: State) -> List[State]:
+        """获取邻居状态（带移动代价）"""
+        neighbors = []
+        
+        new_state = State(state.time + 1, state.location)
+        if self.is_state_valid(new_state):
+            cost = self.get_terrain_cost(state.location.x, state.location.y)
+            neighbors.append((new_state, cost))
+        
+        directions = DIRS8 if self.use_diagonal else DIRS
+        for dx, dy in directions:
+            new_x = state.location.x + dx
+            new_y = state.location.y + dy
+            
+            if self.use_diagonal and dx != 0 and dy != 0:
+                if not self._can_move_diagonal(state.location.x, state.location.y, new_x, new_y):
+                    continue
+            
+            new_loc = Location(new_x, new_y)
+            new_state = State(state.time + 1, new_loc)
+            
+            if self.is_state_valid(new_state) and self.is_edge_satisfied(state, new_state):
+                if dx != 0 and dy != 0:
+                    move_cost = 1.414
+                else:
+                    move_cost = 1.0
+                terrain_cost = self.get_terrain_cost(new_x, new_y)
+                total_cost = move_cost * terrain_cost
+                neighbors.append((new_state, total_cost))
         
         return neighbors
     
@@ -137,30 +200,75 @@ class Environment:
             state1.time, state1.location, state2.location
         )
     
-    def calc_g(self, current: State, neighbor: State) -> int:
+    def calc_g(self, current: State, neighbor: State, use_weighted: bool = False) -> float:
         """计算g值（移动代价）"""
-        return 1
+        if not use_weighted:
+            return 1
+        
+        dx = neighbor.location.x - current.location.x
+        dy = neighbor.location.y - current.location.y
+        
+        if dx != 0 and dy != 0:
+            move_cost = 1.414
+        else:
+            move_cost = 1.0
+        
+        terrain_cost = self.get_terrain_cost(neighbor.location.x, neighbor.location.y)
+        return move_cost * terrain_cost
     
-    def calc_h(self, state: State, agent_name: str) -> int:
-        """计算h值（启发式估计 - 曼哈顿距离）"""
+    def calc_h(self, state: State, agent_name: str, heuristic_type: str = "manhattan") -> float:
+        """计算h值（启发式估计）"""
         goal = self.get_agent_goal(agent_name)
+        
+        if heuristic_type == "manhattan":
+            return abs(state.location.x - goal.x) + abs(state.location.y - goal.y)
+        elif heuristic_type == "euclidean":
+            return ((state.location.x - goal.x) ** 2 + (state.location.y - goal.y) ** 2) ** 0.5
+        elif heuristic_type == "octile":
+            dx = abs(state.location.x - goal.x)
+            dy = abs(state.location.y - goal.y)
+            return max(dx, dy) + (1.414 - 1) * min(dx, dy)
+        elif heuristic_type == "weighted":
+            dx = abs(state.location.x - goal.x)
+            dy = abs(state.location.y - goal.y)
+            base = max(dx, dy) + (1.414 - 1) * min(dx, dy)
+            return base * 1.0
         return abs(state.location.x - goal.x) + abs(state.location.y - goal.y)
+    
+    def calc_h_with_terrain(self, state: State, agent_name: str) -> float:
+        """计算带地形的h值（考虑地形代价）"""
+        goal = self.get_agent_goal(agent_name)
+        dx = abs(state.location.x - goal.x)
+        dy = abs(state.location.y - goal.y)
+        
+        base_h = max(dx, dy) + (1.414 - 1) * min(dx, dy)
+        
+        avg_terrain_cost = 1.0
+        return base_h * avg_terrain_cost
     
     def is_reach_target(self, state: State, agent_name: str) -> bool:
         """检查是否到达目标"""
         goal_state = self.agent_dict[agent_name]['goal']
         return state.is_equal_except_time(goal_state)
     
-    def calc_solution(self, use_v2: bool = False) -> Dict[str, List[State]]:
-        """计算所有智能体的路径解决方案"""
-        if use_v2:
+    def calc_solution(self, use_v2: bool = False, use_weighted: bool = False,
+                      algorithm: str = "astar") -> Dict[str, List[State]]:
+        """计算所有智能体的路径解决方案
+        :param use_v2: 是否使用A* v2
+        :param use_weighted: 是否使用加权A*
+        :param algorithm: 算法类型 "astar", "astar_v2", "weighted", "jps"
+        """
+        if algorithm == "astar_v2" or use_v2:
             self.alg = self.a_star_v2
+        elif algorithm == "weighted":
+            self.alg = self.weighted_astar
+        elif algorithm == "jps":
+            self.alg = self.jps
         else:
             self.alg = self.a_star
         
         solution = {}
         for agent_name in self.agent_dict.keys():
-            # 确保每个agent都有约束
             if agent_name not in self.constraint_dict:
                 self.constraint_dict[agent_name] = Constraints()
             self.constraints = self.constraint_dict[agent_name]
@@ -172,8 +280,13 @@ class Environment:
         
         return solution
     
-    def calc_one_solution(self, org_solution: Dict, agent_to_adjust: str) -> Dict[str, List[State]]:
-        """只重新计算单个智能体的路径"""
+    def calc_one_solution(self, org_solution: Dict, agent_to_adjust: str,
+                          use_weighted: bool = False) -> Dict[str, List[State]]:
+        """只重新计算单个智能体的路径
+        :param org_solution: 原解决方案
+        :param agent_to_adjust: 要重新规划的智能体名称
+        :param use_weighted: 是否使用加权A*
+        """
         import copy
         solution = copy.deepcopy(org_solution)
         
